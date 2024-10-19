@@ -60,7 +60,13 @@ fn set_database() -> Result<(), PostgressError> {
 
 //Get id from request URL
 fn get_id(request: &str) -> &str {
-    request.split("/").nth(2).unwrap_or_default().split_whitespace().next().unwrap_or_default()
+    request
+        .split("/")
+        .nth(2)
+        .unwrap_or_default()
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
 }
 
 //deserialize user from reqeust body without id
@@ -68,3 +74,28 @@ fn get_user_request_body(request: &str) -> Result<User, serde_json::Error> {
     serde_json::from_str(request.split("\r\n\r\n").last().unwrap_or_default())
 }
 
+//handle requests
+fn handle_client(mut stream: TcpStream) {
+    let mut buffer = [0; 1024];
+    let mut request = String::new();
+
+    match stream.read(&mut buffer) {
+        Ok(size) => {
+            request.push_str(String::from_utf8_lossy(&buffer[..size]).as_ref());
+
+            let (status_line, content) = match &*request {
+                r if r.starts_with("POST /users") => handle_post_request(r),
+                r if r.starts_with("GET /user") => handle_get_request(r),
+                r if r.starts_with("GET /users") => handle_get_all_request(r),
+                r if r.starts_with("PUT /users") => handle_post_request(r),
+                r if r.starts_with("DELETE /users") => handle_delete_request(r),
+                _ => (NOT_FOUND.to_string(), "404 not found".to_string()),
+            }
+
+            stream
+                .write_all(format!("{}{}", status_line, content).as_bytes())
+                .unwrap();
+        }
+        Err(e) => eprintln!("Unable to read stream: {}", e),
+    }
+}
