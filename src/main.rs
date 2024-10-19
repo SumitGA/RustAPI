@@ -1,8 +1,11 @@
 use postgres::Error as PostgressError;
 use postgres::{Client, NoTls};
-use std::env;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::env;
+
+#[macro_use]
+extern crate serde_derive;
 
 #[derive(Serialize, Deserialize)]
 struct User {
@@ -17,8 +20,7 @@ const OK_RESPONSE: &str = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n
 const NOT_FOUND: &str = "HTTP/1.1 404 NOT FOUND\r\n\r\n";
 const INTERNAL_ERROR: &str = "HTTP/1.1 500 INTERNAL ERROR\r\n\r\n";
 
-#[macro_use]
-extern crate serde_derive;
+
 
 fn main() {
     // Set Database
@@ -28,7 +30,7 @@ fn main() {
     }
 
     // start server and print port
-    let listener = TcpListener::bind(format!("0.0.0.0:8080")).unwarp();
+    let listener = TcpListener::bind(format!("0.0.0.0:8080")).unwrap();
     println!("Server listening on port 8080");
 
     for stream in listener.incoming() {
@@ -85,12 +87,12 @@ fn handle_client(mut stream: TcpStream) {
 
             let (status_line, content) = match &*request {
                 r if r.starts_with("POST /users") => handle_post_request(r),
-                r if r.starts_with("GET /user") => handle_get_request(r),
+                r if r.starts_with("GET /users/") => handle_get_request(r),
                 r if r.starts_with("GET /users") => handle_get_all_request(r),
-                r if r.starts_with("PUT /users") => handle_post_request(r),
-                r if r.starts_with("DELETE /users") => handle_delete_request(r),
+                r if r.starts_with("PUT /users/") => handle_post_request(r),
+                r if r.starts_with("DELETE /users/") => handle_delete_request(r),
                 _ => (NOT_FOUND.to_string(), "404 not found".to_string()),
-            }
+            };
 
             stream
                 .write_all(format!("{}{}", status_line, content).as_bytes())
@@ -105,7 +107,7 @@ fn handle_post_request(request: &str) -> (String, String) {
     match(get_user_request_body(&request), Client::connect(DB_URL, NoTls)) {
         (Ok(user), Ok(mut client)) => {
             client
-            .execute("INSERT INTO users(name, email) VALUES($1, $2", &[&user.name, &user.email])
+            .execute("INSERT INTO users (name, email) VALUES($1, $2)", &[&user.name, &user.email])
             .unwrap();
             (OK_RESPONSE.to_string(), "User created".to_string())
         }
@@ -139,17 +141,29 @@ fn handle_get_all_request(_request: &str) -> (String, String) {
         Ok(mut client) => {
             let mut users = Vec::new();
 
-            for row in client.query("SELECT id, name, email FROM users", &[]).unwrap() {
-                users.push(User {
-                    id: row.get(0),
-                    name: row.get(1),
-                    email: row.get(2),
-                });
+            match client.query("SELECT * FROM users", &[]) {
+                Ok(rows) => {
+                    for row in rows {
+                        users.push(User {
+                            id: row.get(0),
+                            name: row.get(1),
+                            email: row.get(2),
+                        });
+                    }
+                    (OK_RESPONSE.to_string(), serde_json::to_string(&users).unwrap())
+                }
+                Err(e) => {
+                    // Log the error for further investigation
+                    eprintln!("Database query error: {}", e);
+                    (INTERNAL_ERROR.to_string(), "Query failed".to_string())
+                }
             }
-
-            (OK_RESPONSE.to_string(), serde_json::to_string(&users).unwrap())
         }
-        _ => (INTERNAL_ERROR.to_string(), "Internal error".to_string()),
+        Err(e) => {
+            // Log the error for connection failure
+            eprintln!("Database connection error: {}", e);
+            (INTERNAL_ERROR.to_string(), "Internal error".to_string())
+        }
     }
 }
 

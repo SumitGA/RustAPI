@@ -1,5 +1,5 @@
 # Build state
-FROM rust:1.69-buster as builder
+FROM rust:1.70-buster as builder
 
 WORKDIR /app
 
@@ -20,6 +20,6 @@ FROM debian:buster-slim
 
 WORKDIR /usr/local/bin
 
-COPY --from=builder /app/target/release/rustapi .
+COPY --from=builder /app/target/release/RustAPI .
 
-CMD ["./rustapi"]
+CMD ["./RustAPI"]
